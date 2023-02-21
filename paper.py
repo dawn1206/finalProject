@@ -5,14 +5,14 @@ import preprocess
 import ctypes
 import time
 
-def process(y,sr):
+def process(y,sr,length = 399,feature = 213):
     # pre_emphasis1 = y.copy()
     # ptr1 = pre_emphasis1.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
     # cDLLcontroller = ctypes.cdll.LoadLibrary(r'.\Dll2.dll')
     # cDLLcontroller.audioProcess1(ptr1, sr)  # 函数调用
 
-    lframe = int(sr*0.03)  # 帧长(持续0.02秒)
-    mframe = int(sr*0.015)  # 帧移
+    lframe = int(sr*0.01)  # 帧长(持续0.02秒)
+    mframe = int(sr*0.005)  # 帧移
 
     endframe, fn1, numfillzero = preprocess.frame(y, lframe, mframe)  # 分帧
 
@@ -20,35 +20,48 @@ def process(y,sr):
     hanwindow = np.hamming(lframe)  # 调用汉明窗，把参数帧长传递进去
     signalwindow = endframe * hanwindow
 
-    mlmcList = np.ndarray(shape=(145,1))
-    for i in signalwindow:
-        mfcc = librosa.feature.mfcc(i,n_mfcc=60,sr =sr)
+    m = np.ndarray(shape=(feature,1))
+        # for i in signalwindow:
+    mfcc = librosa.feature.mfcc(signalwindow,n_mfcc=60,sr =sr)
         # librosa.display.specshow(mfcc, x_axis="time", y_axis="mel", sr=sr)
         
-        lm = librosa.feature.melspectrogram(i,n_mels = 60,sr =sr)
+    lm = librosa.feature.melspectrogram(signalwindow,n_mels = 128,sr =sr)
 
-        log_mel_spectrogram = librosa.power_to_db(lm)
+    log_mel_spectrogram = librosa.power_to_db(lm,ref=np.max)
         # librosa.display.specshow(log_mel_spectrogram, x_axis="time", y_axis="mel", sr=sr)
 
-        ch = librosa.feature.chroma_stft(i,sr =sr)
-        spectralContrast = librosa.feature.spectral_contrast(i,sr =sr)
-        tonnetz = librosa.feature.tonnetz(i,sr =sr)
+    ch = librosa.power_to_db(librosa.feature.chroma_stft(signalwindow,sr =sr),ref=np.max)
+    spectralContrast = librosa.feature.spectral_contrast(signalwindow,sr =sr)
+    tonnetz = librosa.power_to_db(librosa.feature.tonnetz(signalwindow,sr =sr),ref=np.max)
 
-        mlmc = np.concatenate((mfcc,log_mel_spectrogram,ch,spectralContrast,tonnetz),axis=0)
-        mlmcList = np.concatenate((mlmcList,mlmc),axis =1)
-    return mlmcList[1:]
-    # MFCC_a = []  # MFCC用于存放每一段音频的MFCC特征参数
-    # for l in range(0, len(ZERO2) - 1, 2):
-    #     audio_dst = y[ZERO2[l] * mframe: ZERO2[l + 1] * mframe]  # 截取
-    #     mfccs = librosa.feature.mfcc(audio_dst, n_mfcc=13)  # 求MFCC
-    #     MFCC_a.append(mfccs)  # 把每一段的mfcc特征参数存进MFCC之中
+    for i in range(len(signalwindow)):
+        mlmc = np.concatenate((mfcc[i],log_mel_spectrogram[i],ch[i],spectralContrast[i],tonnetz[i]),axis=0)
+        m = np.concatenate((m,mlmc),axis =1)
+    m = m[:,1:]
+    repeatTimes = int(np.floor(length/m.shape[1]))
+    if m.shape[1] != length:
+        n = np.zeros((1,1,feature,length))
+        for ind in range(repeatTimes):
+            n[0][0][:,ind*m.shape[1]:(ind+1)*m.shape[1]] = m[:,:m.shape[1]]
+        m = n
+        m = m[:,:length].reshape((1,1,feature,length))
+    return m
 
 if __name__ == "__main__":
-    dataList = os.listdir("./Dataset")
+    name = "/home/calino/soundClassification/dataTrulySin/dataSingle/cough"
+    storeDir = "/home/calino/soundClassification/dataTrulySin/dataTrulySinNPY"
+    dataList = os.listdir(name)
+    # duraList = []
+    # npyList = []
     for i in dataList:
-        print(i.split("-")[1][0])
-        if os.path.exists(os.path.join("./data/",i+".npy")) or i.split("-")[1][0] != "3":
+        if len(i.split("."))!=2:
             continue
-        y, sr = librosa.load("./Dataset/" + i)
+        y, sr = librosa.load(name+"/" + i)
+        d = librosa.get_duration(y)
+        if d < 0.01:
+            continue
         mlmc = process(y,sr)
-        np.save(os.path.join("./data/",i+".npy"),mlmc)
+        # duraList.append(mlmc.shape[1])
+        # npyList.append(mlmc)
+        np.save(os.path.join(storeDir,"cough",i+".npy"),mlmc)
+
